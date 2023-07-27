@@ -4,18 +4,18 @@
 	This file is part of the VESC firmware.
 
 	The VESC firmware is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
 
-    The VESC firmware is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	The VESC firmware is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    */
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	*/
 
 #include "encoder.h"
 #include "ch.h"
@@ -27,56 +27,57 @@
 #include <math.h>
 
 // Defines
-#define AS5047P_READ_ANGLECOM		(0x3FFF | 0x4000 | 0x8000) // This is just ones
-#define AS5047_SAMPLE_RATE_HZ		20000
-#define AD2S1205_SAMPLE_RATE_HZ		20000		//25MHz max spi clk
-#define MT6816_SAMPLE_RATE_HZ		20000
-#define MT6816_NO_MAGNET_ERROR_MASK	0x0002
-#define SINCOS_SAMPLE_RATE_HZ		20000
-#define SINCOS_MIN_AMPLITUDE		1.0			// sqrt(sin^2 + cos^2) has to be larger than this
-#define SINCOS_MAX_AMPLITUDE		1.65		// sqrt(sin^2 + cos^2) has to be smaller than this
+#define AS5047P_READ_ANGLECOM (0x3FFF | 0x4000 | 0x8000) // This is just ones
+#define AS5047_SAMPLE_RATE_HZ 20000
+#define AD2S1205_SAMPLE_RATE_HZ 20000 // 25MHz max spi clk
+#define MT6816_SAMPLE_RATE_HZ 20000
+#define MT6816_NO_MAGNET_ERROR_MASK 0x0002
+#define SINCOS_SAMPLE_RATE_HZ 20000
+#define SINCOS_MIN_AMPLITUDE 0.0  // sqrt(sin^2 + cos^2) has to be larger than this
+#define SINCOS_MAX_AMPLITUDE 1.65 // sqrt(sin^2 + cos^2) has to be smaller than this
 
 #if (AS5047_USE_HW_SPI_PINS) || (MT6816_USE_HW_SPI_PINS) || (AD2S1205_USE_HW_SPI_PINS)
 #ifdef HW_SPI_DEV
-#define SPI_SW_MISO_GPIO			HW_SPI_PORT_MISO
-#define SPI_SW_MISO_PIN				HW_SPI_PIN_MISO
-#define SPI_SW_MOSI_GPIO			HW_SPI_PORT_MOSI
-#define SPI_SW_MOSI_PIN				HW_SPI_PIN_MOSI
-#define SPI_SW_SCK_GPIO				HW_SPI_PORT_SCK
-#define SPI_SW_SCK_PIN				HW_SPI_PIN_SCK
-#define SPI_SW_CS_GPIO				HW_SPI_PORT_NSS
-#define SPI_SW_CS_PIN				HW_SPI_PIN_NSS
+#define SPI_SW_MISO_GPIO HW_SPI_PORT_MISO
+#define SPI_SW_MISO_PIN HW_SPI_PIN_MISO
+#define SPI_SW_MOSI_GPIO HW_SPI_PORT_MOSI
+#define SPI_SW_MOSI_PIN HW_SPI_PIN_MOSI
+#define SPI_SW_SCK_GPIO HW_SPI_PORT_SCK
+#define SPI_SW_SCK_PIN HW_SPI_PIN_SCK
+#define SPI_SW_CS_GPIO HW_SPI_PORT_NSS
+#define SPI_SW_CS_PIN HW_SPI_PIN_NSS
 #else
 // Note: These values are hardcoded.
-#define SPI_SW_MISO_GPIO			GPIOB
-#define SPI_SW_MISO_PIN				4
-#define SPI_SW_MOSI_GPIO			GPIOB
-#define SPI_SW_MOSI_PIN				5
-#define SPI_SW_SCK_GPIO				GPIOB
-#define SPI_SW_SCK_PIN				3
-#define SPI_SW_CS_GPIO				GPIOB
-#define SPI_SW_CS_PIN				0
+#define SPI_SW_MISO_GPIO GPIOB
+#define SPI_SW_MISO_PIN 4
+#define SPI_SW_MOSI_GPIO GPIOB
+#define SPI_SW_MOSI_PIN 5
+#define SPI_SW_SCK_GPIO GPIOB
+#define SPI_SW_SCK_PIN 3
+#define SPI_SW_CS_GPIO GPIOB
+#define SPI_SW_CS_PIN 0
 #endif
 #else
-#define SPI_SW_MISO_GPIO			HW_HALL_ENC_GPIO2
-#define SPI_SW_MISO_PIN				HW_HALL_ENC_PIN2
+#define SPI_SW_MISO_GPIO HW_HALL_ENC_GPIO2
+#define SPI_SW_MISO_PIN HW_HALL_ENC_PIN2
 #if AS504x_USE_SW_MOSI_PIN
 #ifdef HW_SPI_SW_MOSI_GPIO
-#define SPI_SW_MOSI_GPIO 			HW_SPI_SW_MOSI_GPIO
-#define SPI_SW_MOSI_PIN 			HW_SPI_SW_MOSI_PIN
+#define SPI_SW_MOSI_GPIO HW_SPI_SW_MOSI_GPIO
+#define SPI_SW_MOSI_PIN HW_SPI_SW_MOSI_PIN
 #else
-#define SPI_SW_MOSI_GPIO 			HW_SPI_PORT_MOSI
-#define SPI_SW_MOSI_PIN 			HW_SPI_PIN_MOSI
+#define SPI_SW_MOSI_GPIO HW_SPI_PORT_MOSI
+#define SPI_SW_MOSI_PIN HW_SPI_PIN_MOSI
 #endif
 #endif
-#define SPI_SW_SCK_GPIO				HW_HALL_ENC_GPIO1
-#define SPI_SW_SCK_PIN				HW_HALL_ENC_PIN1
-#define SPI_SW_CS_GPIO				HW_HALL_ENC_GPIO3
-#define SPI_SW_CS_PIN				HW_HALL_ENC_PIN3
+#define SPI_SW_SCK_GPIO HW_HALL_ENC_GPIO1
+#define SPI_SW_SCK_PIN HW_HALL_ENC_PIN1
+#define SPI_SW_CS_GPIO HW_HALL_ENC_GPIO3
+#define SPI_SW_CS_PIN HW_HALL_ENC_PIN3
 #endif
 
 // Private types
-typedef enum {
+typedef enum
+{
 	ENCODER_MODE_NONE = 0,
 	ENCODER_MODE_ABI,
 	ENCODER_MODE_AS5047P_SPI,
@@ -117,30 +118,29 @@ static float sincos_signal_low_error_rate = 0.0;
 static float sincos_signal_above_max_error_rate = 0.0;
 
 static SerialConfig TS5700N8501_uart_cfg = {
-		2500000,
-		0,
-		USART_CR2_LINEN,
-		0
-};
+	2500000,
+	0,
+	USART_CR2_LINEN,
+	0};
 
 //                                                             SPI1        SPI2/3
-#define SPI_BaudRatePrescaler_2         ((uint16_t)0x0000) //  42 MHz      21 MHZ
-#define SPI_BaudRatePrescaler_4         ((uint16_t)0x0008) //  21 MHz      10.5 MHz
-#define SPI_BaudRatePrescaler_8         ((uint16_t)0x0010) //  10.5 MHz    5.25 MHz
-#define SPI_BaudRatePrescaler_16        ((uint16_t)0x0018) //  5.25 MHz    2.626 MHz
-#define SPI_BaudRatePrescaler_32        ((uint16_t)0x0020) //  2.626 MHz   1.3125 MHz
-#define SPI_BaudRatePrescaler_64        ((uint16_t)0x0028) //  1.3125 MHz  656.25 KHz
-#define SPI_BaudRatePrescaler_128       ((uint16_t)0x0030) //  656.25 KHz  328.125 KHz
-#define SPI_BaudRatePrescaler_256       ((uint16_t)0x0038) //  328.125 KHz 164.06 KHz
-#define SPI_DATASIZE_16BIT				SPI_CR1_DFF
+#define SPI_BaudRatePrescaler_2 ((uint16_t)0x0000)	 //  42 MHz      21 MHZ
+#define SPI_BaudRatePrescaler_4 ((uint16_t)0x0008)	 //  21 MHz      10.5 MHz
+#define SPI_BaudRatePrescaler_8 ((uint16_t)0x0010)	 //  10.5 MHz    5.25 MHz
+#define SPI_BaudRatePrescaler_16 ((uint16_t)0x0018)	 //  5.25 MHz    2.626 MHz
+#define SPI_BaudRatePrescaler_32 ((uint16_t)0x0020)	 //  2.626 MHz   1.3125 MHz
+#define SPI_BaudRatePrescaler_64 ((uint16_t)0x0028)	 //  1.3125 MHz  656.25 KHz
+#define SPI_BaudRatePrescaler_128 ((uint16_t)0x0030) //  656.25 KHz  328.125 KHz
+#define SPI_BaudRatePrescaler_256 ((uint16_t)0x0038) //  328.125 KHz 164.06 KHz
+#define SPI_DATASIZE_16BIT SPI_CR1_DFF
 
 #ifdef HW_SPI_DEV
-//MT6816 max clk freq: 15.625MHz
+// MT6816 max clk freq: 15.625MHz
 static const SPIConfig mt6816_spi_cfg = {
-		NULL,
-		SPI_SW_CS_GPIO,
-		SPI_SW_CS_PIN,
-		SPI_BaudRatePrescaler_4 | SPI_CR1_CPOL | SPI_CR1_CPHA | SPI_DATASIZE_16BIT};
+	NULL,
+	SPI_SW_CS_GPIO,
+	SPI_SW_CS_PIN,
+	SPI_BaudRatePrescaler_4 | SPI_CR1_CPOL | SPI_CR1_CPHA | SPI_DATASIZE_16BIT};
 #endif
 
 static THD_FUNCTION(ts5700n8501_thread, arg);
@@ -173,84 +173,104 @@ static uint8_t AS504x_spi_transfer_err_check(uint16_t *in_buf, const uint16_t *o
 static uint32_t AS504x_data_last_invalid_counter = 0;
 #endif
 
-uint32_t encoder_spi_get_error_cnt(void) {
+uint32_t encoder_spi_get_error_cnt(void)
+{
 	return spi_error_cnt;
 }
 
-uint32_t encoder_spi_get_val(void) {
+uint32_t encoder_spi_get_val(void)
+{
 	return spi_val;
 }
 
-float encoder_spi_get_error_rate(void) {
+float encoder_spi_get_error_rate(void)
+{
 	return spi_error_rate;
 }
 
-uint32_t encoder_get_no_magnet_error_cnt(void) {
+uint32_t encoder_get_no_magnet_error_cnt(void)
+{
 	return encoder_no_magnet_error_cnt;
 }
 
-float encoder_get_no_magnet_error_rate(void) {
+float encoder_get_no_magnet_error_rate(void)
+{
 	return encoder_no_magnet_error_rate;
 }
 
-float encoder_resolver_loss_of_tracking_error_rate(void) {
+float encoder_resolver_loss_of_tracking_error_rate(void)
+{
 	return resolver_loss_of_tracking_error_rate;
 }
 
-float encoder_resolver_degradation_of_signal_error_rate(void) {
+float encoder_resolver_degradation_of_signal_error_rate(void)
+{
 	return resolver_degradation_of_signal_error_rate;
 }
 
-float encoder_resolver_loss_of_signal_error_rate(void) {
+float encoder_resolver_loss_of_signal_error_rate(void)
+{
 	return resolver_loss_of_signal_error_rate;
 }
 
-uint32_t encoder_resolver_loss_of_tracking_error_cnt(void) {
+uint32_t encoder_resolver_loss_of_tracking_error_cnt(void)
+{
 	return resolver_loss_of_tracking_error_cnt;
 }
 
-uint32_t encoder_resolver_degradation_of_signal_error_cnt(void) {
+uint32_t encoder_resolver_degradation_of_signal_error_cnt(void)
+{
 	return resolver_degradation_of_signal_error_cnt;
 }
 
-uint32_t encoder_resolver_loss_of_signal_error_cnt(void) {
+uint32_t encoder_resolver_loss_of_signal_error_cnt(void)
+{
 	return resolver_loss_of_signal_error_cnt;
 }
 
-uint32_t encoder_sincos_get_signal_below_min_error_cnt(void) {
+uint32_t encoder_sincos_get_signal_below_min_error_cnt(void)
+{
 	return sincos_signal_below_min_error_cnt;
 }
 
-uint32_t encoder_sincos_get_signal_above_max_error_cnt(void) {
+uint32_t encoder_sincos_get_signal_above_max_error_cnt(void)
+{
 	return sincos_signal_above_max_error_cnt;
 }
 
-float encoder_sincos_get_signal_below_min_error_rate(void) {
+float encoder_sincos_get_signal_below_min_error_rate(void)
+{
 	return sincos_signal_low_error_rate;
 }
 
-float encoder_sincos_get_signal_above_max_error_rate(void) {
+float encoder_sincos_get_signal_above_max_error_rate(void)
+{
 	return sincos_signal_above_max_error_rate;
 }
 
-uint8_t* encoder_ts5700n8501_get_raw_status(void) {
-	return (uint8_t*)ts5700n8501_raw_status;
+uint8_t *encoder_ts5700n8501_get_raw_status(void)
+{
+	return (uint8_t *)ts5700n8501_raw_status;
 }
 
-int16_t encoder_ts57n8501_get_abm(void) {
+int16_t encoder_ts57n8501_get_abm(void)
+{
 	return (uint16_t)ts5700n8501_raw_status[4] |
-			((uint16_t)ts5700n8501_raw_status[5] << 8);
+		   ((uint16_t)ts5700n8501_raw_status[5] << 8);
 }
 
-void encoder_ts57n8501_reset_errors(void) {
+void encoder_ts57n8501_reset_errors(void)
+{
 	ts5700n8501_reset_errors = true;
 }
 
-void encoder_ts57n8501_reset_multiturn(void) {
+void encoder_ts57n8501_reset_multiturn(void)
+{
 	ts5700n8501_reset_multiturn = true;
 }
 
-void encoder_deinit(void) {
+void encoder_deinit(void)
+{
 	nvicDisableVector(HW_ENC_EXTI_CH);
 	nvicDisableVector(HW_ENC_TIM_ISR_CH);
 
@@ -267,9 +287,11 @@ void encoder_deinit(void) {
 	palSetPadMode(HW_HALL_ENC_GPIO1, HW_HALL_ENC_PIN1, PAL_MODE_INPUT_PULLUP);
 	palSetPadMode(HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2, PAL_MODE_INPUT_PULLUP);
 
-	if (mode == ENCODER_MODE_TS5700N8501) {
+	if (mode == ENCODER_MODE_TS5700N8501)
+	{
 		ts5700n8501_stop_now = true;
-		while (ts5700n8501_is_running) {
+		while (ts5700n8501_is_running)
+		{
 			chThdSleepMilliseconds(1);
 		}
 
@@ -288,8 +310,9 @@ void encoder_deinit(void) {
 	sincos_signal_above_max_error_rate = 0.0;
 }
 
-void encoder_init_abi(uint32_t counts) {
-	EXTI_InitTypeDef   EXTI_InitStructure;
+void encoder_init_abi(uint32_t counts)
+{
+	EXTI_InitTypeDef EXTI_InitStructure;
 
 	// Initialize variables
 	index_found = false;
@@ -297,7 +320,7 @@ void encoder_init_abi(uint32_t counts) {
 
 	palSetPadMode(HW_HALL_ENC_GPIO1, HW_HALL_ENC_PIN1, PAL_MODE_ALTERNATE(HW_ENC_TIM_AF));
 	palSetPadMode(HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2, PAL_MODE_ALTERNATE(HW_ENC_TIM_AF));
-//	palSetPadMode(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3, PAL_MODE_ALTERNATE(HW_ENC_TIM_AF));
+	//	palSetPadMode(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3, PAL_MODE_ALTERNATE(HW_ENC_TIM_AF));
 
 	// Enable timer clock
 	HW_ENC_TIM_CLK_EN();
@@ -305,9 +328,9 @@ void encoder_init_abi(uint32_t counts) {
 	// Enable SYSCFG clock
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
 
-	TIM_EncoderInterfaceConfig (HW_ENC_TIM, TIM_EncoderMode_TI12,
-			TIM_ICPolarity_Rising,
-			TIM_ICPolarity_Rising);
+	TIM_EncoderInterfaceConfig(HW_ENC_TIM, TIM_EncoderMode_TI12,
+							   TIM_ICPolarity_Rising,
+							   TIM_ICPolarity_Rising);
 	TIM_SetAutoreload(HW_ENC_TIM, enc_counts - 1);
 
 	// Filter
@@ -334,15 +357,16 @@ void encoder_init_abi(uint32_t counts) {
 	mode = ENCODER_MODE_ABI;
 }
 
-void encoder_init_as5047p_spi(void) {
-	TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
+void encoder_init_as5047p_spi(void)
+{
+	TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
 
 	palSetPadMode(SPI_SW_MISO_GPIO, SPI_SW_MISO_PIN, PAL_MODE_INPUT);
 	palSetPadMode(SPI_SW_SCK_GPIO, SPI_SW_SCK_PIN, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
 	palSetPadMode(SPI_SW_CS_GPIO, SPI_SW_CS_PIN, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
 
 	// Set MOSI to 1
-#if (AS5047_USE_HW_SPI_PINS || AD2S1205_USE_HW_SPI_PINS || AS504x_USE_SW_MOSI_PIN )
+#if (AS5047_USE_HW_SPI_PINS || AD2S1205_USE_HW_SPI_PINS || AS504x_USE_SW_MOSI_PIN)
 	palSetPadMode(SPI_SW_MOSI_GPIO, SPI_SW_MOSI_PIN, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
 	palSetPad(SPI_SW_MOSI_GPIO, SPI_SW_MOSI_PIN);
 #endif
@@ -369,12 +393,12 @@ void encoder_init_as5047p_spi(void) {
 	mode = ENCODER_MODE_AS5047P_SPI;
 	index_found = true;
 	spi_error_rate = 0.0;
-
 }
 
-void encoder_init_mt6816_spi(void) {
+void encoder_init_mt6816_spi(void)
+{
 #ifdef HW_SPI_DEV
-	TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
+	TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
 
 	palSetPadMode(SPI_SW_SCK_GPIO, SPI_SW_SCK_PIN, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);
 	palSetPadMode(SPI_SW_MISO_GPIO, SPI_SW_MISO_PIN, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);
@@ -384,7 +408,7 @@ void encoder_init_mt6816_spi(void) {
 	palSetPadMode(SPI_SW_MOSI_GPIO, SPI_SW_MOSI_PIN, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);
 #endif
 
-	//Start driver with MT6816 SPI settings
+	// Start driver with MT6816 SPI settings
 	spiStart(&HW_SPI_DEV, &mt6816_spi_cfg);
 
 	// Enable timer clock
@@ -413,8 +437,9 @@ void encoder_init_mt6816_spi(void) {
 #endif
 }
 
-void encoder_init_ad2s1205_spi(void) {
-	TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
+void encoder_init_ad2s1205_spi(void)
+{
+	TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
 
 	resolver_loss_of_tracking_error_rate = 0.0;
 	resolver_degradation_of_signal_error_rate = 0.0;
@@ -435,13 +460,12 @@ void encoder_init_ad2s1205_spi(void) {
 	// TODO: Choose pins on comm port when these are not defined
 #if defined(AD2S1205_SAMPLE_GPIO)
 	palSetPadMode(AD2S1205_SAMPLE_GPIO, AD2S1205_SAMPLE_PIN, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
-	palSetPad(AD2S1205_SAMPLE_GPIO, AD2S1205_SAMPLE_PIN);	// Prepare for a falling edge SAMPLE assertion
+	palSetPad(AD2S1205_SAMPLE_GPIO, AD2S1205_SAMPLE_PIN); // Prepare for a falling edge SAMPLE assertion
 #endif
 #if defined(AD2S1205_RDVEL_GPIO)
 	palSetPadMode(AD2S1205_RDVEL_GPIO, AD2S1205_RDVEL_PIN, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
-	palSetPad(AD2S1205_RDVEL_GPIO, AD2S1205_RDVEL_PIN);		// Will always read position
+	palSetPad(AD2S1205_RDVEL_GPIO, AD2S1205_RDVEL_PIN); // Will always read position
 #endif
-
 
 	// Enable timer clock
 	HW_ENC_TIM_CLK_EN();
@@ -467,8 +491,9 @@ void encoder_init_ad2s1205_spi(void) {
 }
 
 void encoder_init_sincos(float s_gain, float s_offset,
-						 float c_gain, float c_offset, float filter_constant) {
-	//ADC inputs are already initialized in hw_init_gpio()
+						 float c_gain, float c_offset, float filter_constant)
+{
+	// ADC inputs are already initialized in hw_init_gpio()
 	sin_gain = s_gain;
 	sin_offset = s_offset;
 	cos_gain = c_gain;
@@ -481,16 +506,17 @@ void encoder_init_sincos(float s_gain, float s_offset,
 	sincos_signal_above_max_error_rate = 0.0;
 
 	// ADC measurements needs to be in sync with motor PWM
-#ifdef HW_HAS_SIN_COS_ENCODER
+	// #ifdef HW_HAS_SIN_COS_ENCODER
 	mode = ENCODER_MODE_SINCOS;
 	index_found = true;
-#else
-	mode = ENCODER_MODE_NONE;
-	index_found = false;
-#endif
+	// #else
+	// 	mode = ENCODER_MODE_NONE;
+	// 	index_found = false;
+	// #endif
 }
 
-void encoder_init_ts5700n8501(void) {
+void encoder_init_ts5700n8501(void)
+{
 	mode = ENCODER_MODE_TS5700N8501;
 	index_found = true;
 	spi_error_rate = 0.0;
@@ -499,10 +525,11 @@ void encoder_init_ts5700n8501(void) {
 	ts5700n8501_stop_now = false;
 
 	chThdCreateStatic(ts5700n8501_thread_wa, sizeof(ts5700n8501_thread_wa),
-			NORMALPRIO - 10, ts5700n8501_thread, NULL);
+					  NORMALPRIO - 10, ts5700n8501_thread, NULL);
 }
 
-bool encoder_is_configured(void) {
+bool encoder_is_configured(void)
+{
 	return mode != ENCODER_MODE_NONE;
 }
 
@@ -512,10 +539,12 @@ bool encoder_is_configured(void) {
  * @return
  * The current encoder angle in degrees.
  */
-float encoder_read_deg(void) {
+float encoder_read_deg(void)
+{
 	static float angle = 0.0;
 
-	switch (mode) {
+	switch (mode)
+	{
 	case ENCODER_MODE_ABI:
 		angle = ((float)HW_ENC_TIM->CNT * 360.0) / (float)enc_counts;
 		break;
@@ -527,35 +556,42 @@ float encoder_read_deg(void) {
 		angle = last_enc_angle;
 		break;
 
-#ifdef HW_HAS_SIN_COS_ENCODER
-	case ENCODER_MODE_SINCOS: {
-		float sin = ENCODER_SIN_VOLTS * sin_gain - sin_offset;
-		float cos = ENCODER_COS_VOLTS * cos_gain - cos_offset;
+// #ifdef HW_HAS_SIN_COS_ENCODER
+	case ENCODER_MODE_SINCOS:
+	{
+		float sin = ADC_VOLTS(ADC_IND_EXT) * sin_gain - sin_offset;
+		float cos = ADC_VOLTS(ADC_IND_EXT2) * cos_gain - cos_offset;
 
 		float module = SQ(sin) + SQ(cos);
 
-		if (module > SQ(SINCOS_MAX_AMPLITUDE) )	{
+		if (module > SQ(SINCOS_MAX_AMPLITUDE))
+		{
 			// signals vector outside of the valid area. Increase error count and discard measurement
 			++sincos_signal_above_max_error_cnt;
-			UTILS_LP_FAST(sincos_signal_above_max_error_rate, 1.0, 1./SINCOS_SAMPLE_RATE_HZ);
+			UTILS_LP_FAST(sincos_signal_above_max_error_rate, 1.0, 1. / SINCOS_SAMPLE_RATE_HZ);
 			angle = last_enc_angle;
-		} else {
-			if (module < SQ(SINCOS_MIN_AMPLITUDE)) {
+		}
+		else
+		{
+			if (module < SQ(SINCOS_MIN_AMPLITUDE))
+			{
 				++sincos_signal_below_min_error_cnt;
-				UTILS_LP_FAST(sincos_signal_low_error_rate, 1.0, 1./SINCOS_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(sincos_signal_low_error_rate, 1.0, 1. / SINCOS_SAMPLE_RATE_HZ);
 				angle = last_enc_angle;
-			} else {
-				UTILS_LP_FAST(sincos_signal_above_max_error_rate, 0.0, 1./SINCOS_SAMPLE_RATE_HZ);
-				UTILS_LP_FAST(sincos_signal_low_error_rate, 0.0, 1./SINCOS_SAMPLE_RATE_HZ);
+			}
+			else
+			{
+				UTILS_LP_FAST(sincos_signal_above_max_error_rate, 0.0, 1. / SINCOS_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(sincos_signal_low_error_rate, 0.0, 1. / SINCOS_SAMPLE_RATE_HZ);
 
-				float angle_tmp = RAD2DEG_f(utils_fast_atan2(sin, cos));
+				float angle_tmp = RAD2DEG_f(utils_fast_atan2(sin, cos)) + 180.0;
 				UTILS_LP_FAST(angle, angle_tmp, sincos_filter_constant);
 				last_enc_angle = angle;
 			}
 		}
 		break;
 	}
-#endif
+// #endif
 
 	default:
 		break;
@@ -567,11 +603,14 @@ float encoder_read_deg(void) {
 /*
  * Note: This is not a good solution and needs a proper implementation later...
  */
-float encoder_read_deg_multiturn(void) {
-	if (mode == ENCODER_MODE_TS5700N8501) {
+float encoder_read_deg_multiturn(void)
+{
+	if (mode == ENCODER_MODE_TS5700N8501)
+	{
 		encoder_ts57n8501_get_abm();
 		float ts_mt = (float)encoder_ts57n8501_get_abm();
-		if (fabsf(ts_mt) > 5000.0) {
+		if (fabsf(ts_mt) > 5000.0)
+		{
 			ts_mt = 0;
 			encoder_ts57n8501_reset_multiturn();
 		}
@@ -579,7 +618,9 @@ float encoder_read_deg_multiturn(void) {
 		ts_mt += 5000;
 
 		return encoder_read_deg() / 10000.0 + (360 * ts_mt) / 10000.0;
-	} else {
+	}
+	else
+	{
 		return encoder_read_deg();
 	}
 }
@@ -587,31 +628,40 @@ float encoder_read_deg_multiturn(void) {
 /**
  * Reset the encoder counter. Should be called from the index interrupt.
  */
-void encoder_reset(void) {
+void encoder_reset(void)
+{
 	// Only reset if the pin is still high to avoid too short pulses, which
 	// most likely are noise.
 	__NOP();
 	__NOP();
 	__NOP();
 	__NOP();
-	if (palReadPad(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3)) {
+	if (palReadPad(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3))
+	{
 		const unsigned int cnt = HW_ENC_TIM->CNT;
 		static int bad_pulses = 0;
 		const unsigned int lim = enc_counts / 20;
 
-		if (index_found) {
+		if (index_found)
+		{
 			// Some plausibility filtering.
-			if (cnt > (enc_counts - lim) || cnt < lim) {
+			if (cnt > (enc_counts - lim) || cnt < lim)
+			{
 				HW_ENC_TIM->CNT = 0;
 				bad_pulses = 0;
-			} else {
+			}
+			else
+			{
 				bad_pulses++;
 
-				if (bad_pulses > 5) {
+				if (bad_pulses > 5)
+				{
 					index_found = 0;
 				}
 			}
-		} else {
+		}
+		else
+		{
 			HW_ENC_TIM->CNT = 0;
 			index_found = true;
 			bad_pulses = 0;
@@ -620,7 +670,8 @@ void encoder_reset(void) {
 }
 
 // returns true for even number of ones (no parity error according to AS5047 datasheet
-static bool spi_check_parity(uint16_t x) {
+static bool spi_check_parity(uint16_t x)
+{
 	x ^= x >> 8;
 	x ^= x >> 4;
 	x ^= x >> 2;
@@ -629,10 +680,10 @@ static bool spi_check_parity(uint16_t x) {
 }
 
 #if AS504x_USE_SW_MOSI_PIN || AS5047_USE_HW_SPI_PINS
-static uint8_t AS504x_fetch_diag(void) {
+static uint8_t AS504x_fetch_diag(void)
+{
 	uint16_t recf[2], senf[2] = {AS504x_SPI_READ_DIAG_MSG, AS504x_SPI_READ_MAGN_MSG};
 	uint8_t ret = 0;
-
 
 	spi_begin();
 	spi_transfer(0, senf, 1);
@@ -650,8 +701,10 @@ static uint8_t AS504x_fetch_diag(void) {
 	ret |= AS504x_spi_transfer_err_check(recf + 1, 0, 1);
 	spi_end();
 
-	if(!ret) {
-		if (spi_check_parity(recf[0]) && spi_check_parity(recf[1])) {
+	if (!ret)
+	{
+		if (spi_check_parity(recf[0]) && spi_check_parity(recf[1]))
+		{
 			AS504x_sensor_diag.serial_diag_flgs = recf[0];
 			AS504x_sensor_diag.serial_magnitude = recf[1];
 		}
@@ -663,7 +716,8 @@ static uint8_t AS504x_fetch_diag(void) {
 /*
  * This function fetches error flag from AS504x and afterwards clean error flag
  */
-static void AS504x_fetch_clear_err_diag() {
+static void AS504x_fetch_clear_err_diag()
+{
 	uint16_t recf, senf = AS504x_SPI_READ_CLEAR_ERROR_MSG;
 
 	spi_begin();
@@ -683,7 +737,8 @@ static void AS504x_fetch_clear_err_diag() {
  * Try verify if the diagnostics are not corrupt
  * This function can prevent deserialazing corrupted data if the MISO bus is HIGH or LOW
  */
-static uint8_t AS504x_verify_serial() {
+static uint8_t AS504x_verify_serial()
+{
 	uint16_t serial_diag_flgs, serial_magnitude, test_magnitude;
 	uint8_t test_AGC_value, test_is_Comp_high, test_is_Comp_low;
 
@@ -695,17 +750,20 @@ static uint8_t AS504x_verify_serial() {
 	test_is_Comp_low = (serial_diag_flgs >> AS504x_SPI_DIAG_COMP_LOW_BIT_POS) & 1;
 	test_is_Comp_high = (serial_diag_flgs >> AS504x_SPI_DIAG_COMP_HIGH_BIT_POS) & 1;
 
-	if (test_is_Comp_high && test_is_Comp_low) {
+	if (test_is_Comp_high && test_is_Comp_low)
+	{
 		return 1;
 	}
-	if((uint32_t)test_magnitude + (uint32_t)test_AGC_value == 0) {
+	if ((uint32_t)test_magnitude + (uint32_t)test_AGC_value == 0)
+	{
 		return 1;
 	}
 
 	return 0;
 }
 
-static void AS504x_deserialize_diag() {
+static void AS504x_deserialize_diag()
+{
 	AS504x_sensor_diag.AGC_value = AS504x_sensor_diag.serial_diag_flgs;
 	AS504x_sensor_diag.is_OCF = (AS504x_sensor_diag.serial_diag_flgs >> AS504x_SPI_DIAG_OCF_BIT_POS) & 1;
 	AS504x_sensor_diag.is_COF = (AS504x_sensor_diag.serial_diag_flgs >> AS504x_SPI_DIAG_COF_BIT_POS) & 1;
@@ -714,11 +772,14 @@ static void AS504x_deserialize_diag() {
 	AS504x_sensor_diag.magnitude = AS504x_sensor_diag.serial_magnitude & AS504x_SPI_EXCLUDE_PARITY_AND_ERROR_BITMASK;
 }
 
-static uint8_t AS504x_spi_transfer_err_check(uint16_t *in_buf, const uint16_t *out_buf, int length) {
+static uint8_t AS504x_spi_transfer_err_check(uint16_t *in_buf, const uint16_t *out_buf, int length)
+{
 	spi_transfer(in_buf, out_buf, length);
 
-	for(int len_count = 0; len_count < length; len_count++) {
-		if(((in_buf[len_count]) >> 14) & 0b01) {
+	for (int len_count = 0; len_count < length; len_count++)
+	{
+		if (((in_buf[len_count]) >> 14) & 0b01)
+		{
 			return 1;
 		}
 	}
@@ -730,31 +791,42 @@ static uint8_t AS504x_spi_transfer_err_check(uint16_t *in_buf, const uint16_t *o
 /*
  * Determinate if is connected depending on last retieved data.
  */
-static void AS504x_determinate_if_connected(bool was_last_valid) {
-	if(!was_last_valid) {
+static void AS504x_determinate_if_connected(bool was_last_valid)
+{
+	if (!was_last_valid)
+	{
 		AS504x_spi_communication_error_count++;
 
-		if(AS504x_spi_communication_error_count >= AS504x_CONNECTION_DETERMINATOR_ERROR_THRESHOLD) {
+		if (AS504x_spi_communication_error_count >= AS504x_CONNECTION_DETERMINATOR_ERROR_THRESHOLD)
+		{
 			AS504x_spi_communication_error_count = AS504x_CONNECTION_DETERMINATOR_ERROR_THRESHOLD;
 			AS504x_sensor_diag.is_connected = 0;
 		}
-	} else {
-		if(AS504x_spi_communication_error_count) {
+	}
+	else
+	{
+		if (AS504x_spi_communication_error_count)
+		{
 			AS504x_spi_communication_error_count--;
-		} else {
+		}
+		else
+		{
 			AS504x_sensor_diag.is_connected = 1;
 		}
 	}
 }
 
-AS504x_diag encoder_AS504x_get_diag(void) {
+AS504x_diag encoder_AS504x_get_diag(void)
+{
 	return AS504x_sensor_diag;
 }
 
-void encoder_tim_isr(void) {
+void encoder_tim_isr(void)
+{
 	uint16_t pos;
 
-	if(mode == ENCODER_MODE_AS5047P_SPI) {
+	if (mode == ENCODER_MODE_AS5047P_SPI)
+	{
 // if MOSI is defined, use diagnostics
 #if AS504x_USE_SW_MOSI_PIN || AS5047_USE_HW_SPI_PINS
 		spi_begin();
@@ -770,18 +842,25 @@ void encoder_tim_isr(void) {
 
 		// get diagnostic every AS504x_REFRESH_DIAG_AFTER_NSAMPLES
 		AS504x_diag_fetch_now_count++;
-		if(AS504x_diag_fetch_now_count >= AS504x_REFRESH_DIAG_AFTER_NSAMPLES || spi_data_err_raised) {
+		if (AS504x_diag_fetch_now_count >= AS504x_REFRESH_DIAG_AFTER_NSAMPLES || spi_data_err_raised)
+		{
 			// clear error flags before getting new diagnostics data
 			AS504x_fetch_clear_err_diag();
 
-			if(!AS504x_fetch_diag()) {
-				if(!AS504x_verify_serial()) {
+			if (!AS504x_fetch_diag())
+			{
+				if (!AS504x_verify_serial())
+				{
 					AS504x_deserialize_diag();
 					AS504x_determinate_if_connected(true);
-				} else {
+				}
+				else
+				{
 					AS504x_determinate_if_connected(false);
 				}
-			} else {
+			}
+			else
+			{
 				AS504x_determinate_if_connected(false);
 			}
 			AS504x_diag_fetch_now_count = 0;
@@ -792,31 +871,39 @@ void encoder_tim_isr(void) {
 		spi_end();
 		spi_val = pos;
 
-		if(0x0000 == pos || 0xFFFF == pos) {
+		if (0x0000 == pos || 0xFFFF == pos)
+		{
 			AS504x_data_last_invalid_counter++;
-		} else {
+		}
+		else
+		{
 			AS504x_data_last_invalid_counter = 0;
 			AS504x_determinate_if_connected(true);
 		}
 
-		if (AS504x_data_last_invalid_counter >= AS504x_DATA_INVALID_THRESHOLD) {
+		if (AS504x_data_last_invalid_counter >= AS504x_DATA_INVALID_THRESHOLD)
+		{
 			AS504x_determinate_if_connected(false);
 			AS504x_data_last_invalid_counter = AS504x_DATA_INVALID_THRESHOLD;
 		}
 #endif
 
-		if(spi_check_parity(pos) && !spi_data_err_raised) {
+		if (spi_check_parity(pos) && !spi_data_err_raised)
+		{
 			pos &= 0x3FFF;
 			last_enc_angle = ((float)pos * 360.0) / 16384.0;
-			UTILS_LP_FAST(spi_error_rate, 0.0, 1./AS5047_SAMPLE_RATE_HZ);
-		} else {
+			UTILS_LP_FAST(spi_error_rate, 0.0, 1. / AS5047_SAMPLE_RATE_HZ);
+		}
+		else
+		{
 			++spi_error_cnt;
-			UTILS_LP_FAST(spi_error_rate, 1.0, 1./AS5047_SAMPLE_RATE_HZ);
-		}		
+			UTILS_LP_FAST(spi_error_rate, 1.0, 1. / AS5047_SAMPLE_RATE_HZ);
+		}
 	}
 
 #ifdef HW_SPI_DEV
-	if(mode == ENCODER_MODE_MT6816_SPI) {
+	if (mode == ENCODER_MODE_MT6816_SPI)
+	{
 		uint16_t reg_data_03;
 		uint16_t reg_data_04;
 		uint16_t reg_addr_03 = 0x8300;
@@ -833,27 +920,34 @@ void encoder_tim_isr(void) {
 		pos = (reg_data_03 << 8) | reg_data_04;
 		spi_val = pos;
 
-		if( spi_check_parity(pos) ) {
-			if (pos & MT6816_NO_MAGNET_ERROR_MASK) {
+		if (spi_check_parity(pos))
+		{
+			if (pos & MT6816_NO_MAGNET_ERROR_MASK)
+			{
 				++encoder_no_magnet_error_cnt;
-				UTILS_LP_FAST(encoder_no_magnet_error_rate, 1.0, 1./MT6816_SAMPLE_RATE_HZ);
-			} else {
+				UTILS_LP_FAST(encoder_no_magnet_error_rate, 1.0, 1. / MT6816_SAMPLE_RATE_HZ);
+			}
+			else
+			{
 				pos = pos >> 2;
 				last_enc_angle = ((float)pos * 360.0) / 16384.0;
-				UTILS_LP_FAST(spi_error_rate, 0.0, 1./MT6816_SAMPLE_RATE_HZ);
-				UTILS_LP_FAST(encoder_no_magnet_error_rate, 0.0, 1./MT6816_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(spi_error_rate, 0.0, 1. / MT6816_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(encoder_no_magnet_error_rate, 0.0, 1. / MT6816_SAMPLE_RATE_HZ);
 			}
-		} else {
+		}
+		else
+		{
 			++spi_error_cnt;
-			UTILS_LP_FAST(spi_error_rate, 1.0, 1./MT6816_SAMPLE_RATE_HZ);
+			UTILS_LP_FAST(spi_error_rate, 1.0, 1. / MT6816_SAMPLE_RATE_HZ);
 		}
 	}
 #endif
 
-	if (mode == RESOLVER_MODE_AD2S1205) {
+	if (mode == RESOLVER_MODE_AD2S1205)
+	{
 		// SAMPLE signal should have been be asserted in sync with ADC sampling
 #ifdef AD2S1205_RDVEL_GPIO
-		palSetPad(AD2S1205_RDVEL_GPIO, AD2S1205_RDVEL_PIN);	// Always read position
+		palSetPad(AD2S1205_RDVEL_GPIO, AD2S1205_RDVEL_PIN); // Always read position
 #endif
 
 		palSetPad(SPI_SW_SCK_GPIO, SPI_SW_SCK_PIN);
@@ -868,55 +962,69 @@ void encoder_tim_isr(void) {
 
 		uint16_t RDVEL = pos & 0x0008; // 1 means a position read
 
-		if((RDVEL != 0)){
+		if ((RDVEL != 0))
+		{
 
 			bool DOS = ((pos & 0x04) == 0);
 			bool LOT = ((pos & 0x02) == 0);
 			bool LOS = DOS && LOT;
-			bool parity_error = spi_check_parity(pos);	//16 bit frame has odd parity
+			bool parity_error = spi_check_parity(pos); // 16 bit frame has odd parity
 			bool angle_is_correct = true;
 
-			if(LOS) {
+			if (LOS)
+			{
 				LOT = DOS = 0;
 			}
 
-			if(!parity_error) {
-				UTILS_LP_FAST(spi_error_rate, 0.0, 1./AD2S1205_SAMPLE_RATE_HZ);
-			} else {
+			if (!parity_error)
+			{
+				UTILS_LP_FAST(spi_error_rate, 0.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
+			}
+			else
+			{
 				angle_is_correct = false;
 				++spi_error_cnt;
-				UTILS_LP_FAST(spi_error_rate, 1.0, 1./AD2S1205_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(spi_error_rate, 1.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
 			}
 
 			pos &= 0xFFF0;
 			pos = pos >> 4;
 			pos &= 0x0FFF;
 
-			if(LOT) {
+			if (LOT)
+			{
 				angle_is_correct = false;
 				++resolver_loss_of_tracking_error_cnt;
-				UTILS_LP_FAST(resolver_loss_of_tracking_error_rate, 1.0, 1./AD2S1205_SAMPLE_RATE_HZ);
-			} else {
-				UTILS_LP_FAST(resolver_loss_of_tracking_error_rate, 0.0, 1./AD2S1205_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(resolver_loss_of_tracking_error_rate, 1.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
+			}
+			else
+			{
+				UTILS_LP_FAST(resolver_loss_of_tracking_error_rate, 0.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
 			}
 
-			if(DOS) {
+			if (DOS)
+			{
 				angle_is_correct = false;
 				++resolver_degradation_of_signal_error_cnt;
-				UTILS_LP_FAST(resolver_degradation_of_signal_error_rate, 1.0, 1./AD2S1205_SAMPLE_RATE_HZ);
-			} else {
-				UTILS_LP_FAST(resolver_degradation_of_signal_error_rate, 0.0, 1./AD2S1205_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(resolver_degradation_of_signal_error_rate, 1.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
+			}
+			else
+			{
+				UTILS_LP_FAST(resolver_degradation_of_signal_error_rate, 0.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
 			}
 
-			if(LOS) {
+			if (LOS)
+			{
 				angle_is_correct = false;
 				++resolver_loss_of_signal_error_cnt;
-				UTILS_LP_FAST(resolver_loss_of_signal_error_rate, 1.0, 1./AD2S1205_SAMPLE_RATE_HZ);
-			} else {
-				UTILS_LP_FAST(resolver_loss_of_signal_error_rate, 0.0, 1./AD2S1205_SAMPLE_RATE_HZ);
+				UTILS_LP_FAST(resolver_loss_of_signal_error_rate, 1.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
+			}
+			else
+			{
+				UTILS_LP_FAST(resolver_loss_of_signal_error_rate, 0.0, 1. / AD2S1205_SAMPLE_RATE_HZ);
 			}
 
-			if(angle_is_correct)
+			if (angle_is_correct)
 			{
 				last_enc_angle = ((float)pos * 360.0) / 4096.0;
 			}
@@ -930,8 +1038,10 @@ void encoder_tim_isr(void) {
  * @param counts
  * The number of encoder counts
  */
-void encoder_set_counts(uint32_t counts) {
-	if (counts != enc_counts) {
+void encoder_set_counts(uint32_t counts)
+{
+	if (counts != enc_counts)
+	{
 		enc_counts = counts;
 		TIM_SetAutoreload(HW_ENC_TIM, enc_counts - 1);
 		index_found = false;
@@ -944,13 +1054,16 @@ void encoder_set_counts(uint32_t counts) {
  * @return
  * True if the index is found, false otherwise.
  */
-bool encoder_index_found(void) {
+bool encoder_index_found(void)
+{
 	return index_found;
 }
 
 // Software SPI
-static void spi_transfer(uint16_t *in_buf, const uint16_t *out_buf, int length) {
-	for (int i = 0;i < length;i++) {
+static void spi_transfer(uint16_t *in_buf, const uint16_t *out_buf, int length)
+{
+	for (int i = 0; i < length; i++)
+	{
 
 #if AS504x_USE_SW_MOSI_PIN || AS5047_USE_HW_SPI_PINS
 		uint16_t send = out_buf ? out_buf[i] : 0xFFFF;
@@ -960,7 +1073,8 @@ static void spi_transfer(uint16_t *in_buf, const uint16_t *out_buf, int length) 
 
 		uint16_t receive = 0;
 
-		for (int bit = 0;bit < 16;bit++) {
+		for (int bit = 0; bit < 16; bit++)
+		{
 #if AS504x_USE_SW_MOSI_PIN || AS5047_USE_HW_SPI_PINS
 			palWritePad(SPI_SW_MOSI_GPIO, SPI_SW_MOSI_PIN, send >> (15 - bit));
 #endif
@@ -980,7 +1094,8 @@ static void spi_transfer(uint16_t *in_buf, const uint16_t *out_buf, int length) 
 			samples += palReadPad(SPI_SW_MISO_GPIO, SPI_SW_MISO_PIN);
 
 			receive <<= 1;
-			if (samples > 2) {
+			if (samples > 2)
+			{
 				receive |= 1;
 			}
 
@@ -988,56 +1103,99 @@ static void spi_transfer(uint16_t *in_buf, const uint16_t *out_buf, int length) 
 			spi_delay();
 		}
 
-		if (in_buf) {
+		if (in_buf)
+		{
 			in_buf[i] = receive;
 		}
 	}
 }
 
-static void spi_begin(void) {
+static void spi_begin(void)
+{
 	palClearPad(SPI_SW_CS_GPIO, SPI_SW_CS_PIN);
 	spi_AS5047_cs_delay();
 }
 
-static void spi_end(void) {
+static void spi_end(void)
+{
 	palSetPad(SPI_SW_CS_GPIO, SPI_SW_CS_PIN);
 	spi_AS5047_cs_delay();
 }
 
-static void spi_delay(void) {
+static void spi_delay(void)
+{
 	__NOP();
 	__NOP();
 	__NOP();
 	__NOP();
 }
 
-static void spi_AS5047_cs_delay(void) {
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
-	__NOP();__NOP();__NOP();
+static void spi_AS5047_cs_delay(void)
+{
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
 	__NOP();
 }
 
 #pragma GCC push_options
-#pragma GCC optimize ("O0")
+#pragma GCC optimize("O0")
 
-void TS5700N8501_delay_uart(void) {
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP();
+void TS5700N8501_delay_uart(void)
+{
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
 }
 
 /*
@@ -1047,29 +1205,53 @@ void TS5700N8501_delay_uart(void) {
  * the system is locked, but it should finish fast enough to not cause problems for other
  * things due to the high baud rate.
  */
-static void TS5700N8501_send_byte(uint8_t b) {
+static void TS5700N8501_send_byte(uint8_t b)
+{
 	utils_sys_lock_cnt();
 #ifdef HW_ADC_EXT_GPIO
 	palSetPad(HW_ADC_EXT_GPIO, HW_ADC_EXT_PIN);
 #endif
 	TS5700N8501_delay_uart();
 	palWritePad(HW_UART_TX_PORT, HW_UART_TX_PIN, 0);
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	for (int i = 0;i < 8;i++) {
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	for (int i = 0; i < 8; i++)
+	{
 		palWritePad(HW_UART_TX_PORT, HW_UART_TX_PIN,
-				(b & (0x80 >> i)) ? PAL_HIGH : PAL_LOW);
+					(b & (0x80 >> i)) ? PAL_HIGH : PAL_LOW);
 		TS5700N8501_delay_uart();
 	}
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
-	__NOP(); __NOP(); __NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
+	__NOP();
 	palWritePad(HW_UART_TX_PORT, HW_UART_TX_PIN, 1);
 	TS5700N8501_delay_uart();
 #ifdef HW_ADC_EXT_GPIO
@@ -1080,33 +1262,32 @@ static void TS5700N8501_send_byte(uint8_t b) {
 
 #pragma GCC pop_options
 
-static THD_FUNCTION(ts5700n8501_thread, arg) {
+static THD_FUNCTION(ts5700n8501_thread, arg)
+{
 	(void)arg;
 
 	chRegSetThreadName("TS5700N8501");
 
 	sdStart(&HW_UART_DEV, &TS5700N8501_uart_cfg);
-	palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_OUTPUT_PUSHPULL |
-			PAL_STM32_OSPEED_HIGHEST |
-			PAL_STM32_PUDR_PULLUP);
-	palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
-			PAL_STM32_OSPEED_HIGHEST |
-			PAL_STM32_PUDR_PULLUP);
+	palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST | PAL_STM32_PUDR_PULLUP);
+	palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) | PAL_STM32_OSPEED_HIGHEST | PAL_STM32_PUDR_PULLUP);
 #ifdef HW_ADC_EXT_GPIO
-	palSetPadMode(HW_ADC_EXT_GPIO, HW_ADC_EXT_PIN, PAL_MODE_OUTPUT_PUSHPULL |
-			PAL_STM32_OSPEED_HIGHEST |
-			PAL_STM32_PUDR_PULLUP);
+	palSetPadMode(HW_ADC_EXT_GPIO, HW_ADC_EXT_PIN, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST | PAL_STM32_PUDR_PULLUP);
 #endif
 
-	for(;;) {
+	for (;;)
+	{
 		// Check if it is time to stop.
-		if (ts5700n8501_stop_now) {
+		if (ts5700n8501_stop_now)
+		{
 			ts5700n8501_is_running = false;
 			return;
 		}
 
-		if (ts5700n8501_reset_errors) {
-			for (int i = 0;i < 20;i++) {
+		if (ts5700n8501_reset_errors)
+		{
+			for (int i = 0; i < 20; i++)
+			{
 				TS5700N8501_send_byte(0b01011101);
 				chThdSleep(2);
 			}
@@ -1114,8 +1295,10 @@ static THD_FUNCTION(ts5700n8501_thread, arg) {
 			ts5700n8501_reset_errors = false;
 		}
 
-		if (ts5700n8501_reset_multiturn) {
-			for (int i = 0;i < 20;i++) {
+		if (ts5700n8501_reset_multiturn)
+		{
+			for (int i = 0; i < 20; i++)
+			{
 				TS5700N8501_send_byte(0b01000110);
 				chThdSleep(2);
 			}
@@ -1131,19 +1314,23 @@ static THD_FUNCTION(ts5700n8501_thread, arg) {
 		int reply_ind = 0;
 
 		msg_t res = sdGetTimeout(&HW_UART_DEV, TIME_IMMEDIATE);
-		while (res != MSG_TIMEOUT) {
-			if (reply_ind < (int)sizeof(reply)) {
+		while (res != MSG_TIMEOUT)
+		{
+			if (reply_ind < (int)sizeof(reply))
+			{
 				reply[reply_ind++] = res;
 			}
 			res = sdGetTimeout(&HW_UART_DEV, TIME_IMMEDIATE);
 		}
 
 		uint8_t crc = 0;
-		for (int i = 0;i < (reply_ind - 1);i++) {
+		for (int i = 0; i < (reply_ind - 1); i++)
+		{
 			crc = (reply[i] ^ crc);
 		}
 
-		if (reply_ind == 11 && crc == reply[reply_ind - 1]) {
+		if (reply_ind == 11 && crc == reply[reply_ind - 1])
+		{
 			uint32_t pos = (uint32_t)reply[2] + ((uint32_t)reply[3] << 8) + ((uint32_t)reply[4] << 16);
 			spi_val = pos;
 			last_enc_angle = (float)pos / 131072.0 * 360.0;
@@ -1157,10 +1344,11 @@ static THD_FUNCTION(ts5700n8501_thread, arg) {
 			ts5700n8501_raw_status[5] = reply[7]; // ABM1
 			ts5700n8501_raw_status[6] = reply[8]; // ABM2
 			ts5700n8501_raw_status[7] = reply[9]; // ALMC
-		} else {
+		}
+		else
+		{
 			++spi_error_cnt;
 			UTILS_LP_FAST(spi_error_rate, 1.0, 1.0 / AS5047_SAMPLE_RATE_HZ);
 		}
 	}
 }
-
